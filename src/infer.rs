@@ -18,34 +18,63 @@ pub struct Infer<'a> {
 impl<'a> Infer<'a> {
     pub fn infer_binary(&self, bin: &Binary) -> Result<TypeId> {
         match bin.op {
-            '+' | '-' | '*' | '/' => {
-                // Check that both sides are numbers
-                let lhs = self.types.get(&bin.lhs);
-                let rhs = self.types.get(&bin.rhs);
-
-                let lhs_is_number = lhs
-                    .and_then(|&id| self.table.borrow().get(id).map(TypeInfo::is_number))
-                    .unwrap_or(false);
-                let rhs_is_number = rhs
-                    .and_then(|&id| self.table.borrow().get(id).map(TypeInfo::is_number))
-                    .unwrap_or(false);
-
-                if !lhs_is_number || !rhs_is_number {
-                    return Err(InferError::InvalidArithmetic);
+            Oper::Add | Oper::Sub | Oper::Mul | Oper::Div => {
+                // All number types (int, float, enum?) are allowed
+                if self.both_match(bin.lhs, bin.rhs, TypeInfo::is_number) {
+                    self.get_matching_binary_type(bin)
+                } else {
+                    Err(InferError::InvalidArithmetic)
                 }
-
-                match (lhs, rhs) {
-                    (Some(a), Some(b)) if a != b => Err(InferError::BinaryMismatch),
-                    (Some(&type_id), _) => self.match_types(bin.rhs, type_id).map(|_| type_id),
-                    (_, Some(&type_id)) => self.match_types(bin.lhs, type_id).map(|_| type_id),
-                    _ => Err(InferError::CannotDetermineBinaryType),
+            },
+            Oper::Gtr | Oper::Lss | Oper::Geq | Oper::Leq => {
+                // Only ordered types can be compared
+                if self.both_match(bin.lhs, bin.rhs, TypeInfo::is_number) {
+                    self.get_matching_binary_type(bin)
+                } else {
+                    Err(InferError::InvalidComparison)
                 }
-            }
-            '%' => {
-                // self.ensure_both_match(bin.lhs, bin.rhs, |a| matches!(a, TypeInfo::Integer(_)))?;
-                todo!()
-            }
-            _ => todo!(),
+            },
+            Oper::Rem | Oper::Shl | Oper::Shr => {
+                // Only integer types are allowed
+                if self.both_match(bin.lhs, bin.rhs, TypeInfo::is_integer) {
+                    self.get_matching_binary_type(bin)
+                } else {
+                    Err(InferError::InvalidIntOp)
+                }
+            },
+            Oper::Eql | Oper::Neq => {
+                // Any type can be compared for equality
+                self.get_matching_binary_type(bin)?;
+                Ok(self.table.borrow().get_builtin("bool"))
+            },
+        }
+    }
+
+    /// Returns true if any side that has a type matches
+    /// the specified predicate. If a side has no type,
+    /// it is ignored.
+    fn both_match<F>(&self, lhs: usize, rhs: usize, pred: F) -> bool
+    where
+        F: Fn(&TypeInfo) -> bool,
+    {
+        [lhs, rhs].iter()
+            .filter_map(|id| self.types.get(id))
+            .all(|&type_id| {
+                self.table.borrow().get(type_id)
+                    .map(&pred)
+                    .unwrap_or(false)
+            })
+    }
+
+    /// Compares the sides of a binary node, returning an error
+    /// if they do not match or if both have no type or the type
+    /// of both sides if they match.
+    fn get_matching_binary_type(&self, bin: &Binary) -> Result<TypeId> {
+        match (self.types.get(&bin.lhs), self.types.get(&bin.rhs)) {
+            (Some(a), Some(b)) if a != b => Err(InferError::BinaryMismatch),
+            (Some(&type_id), _) => self.match_types(bin.rhs, type_id).map(|_| type_id),
+            (_, Some(&type_id)) => self.match_types(bin.lhs, type_id).map(|_| type_id),
+            _ => Err(InferError::CannotDetermineBinaryType),
         }
     }
 
@@ -79,6 +108,8 @@ pub enum InferError {
     SignednessMismatch,
     BinaryMismatch,
     InvalidArithmetic,
+    InvalidComparison,
+    InvalidIntOp,
     CannotDetermineBinaryType,
     ImplicitIntToBool,
 }

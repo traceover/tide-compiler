@@ -15,7 +15,7 @@ fn main() {
 
     let lhs = ast.append(Node::Ident("ITEM".into()));
     let rhs = ast.append(Node::Number(2));
-    let bin = ast.append(Node::Binary(Binary::new('*', lhs, rhs)));
+    let bin = ast.append(Node::Binary(Binary::new(Oper::Mul, lhs, rhs)));
 
     let int_name = ast.append(Node::Ident("int".into()));
     let proto = ast.append(Node::FnProto(Vec::new(), int_name));
@@ -23,9 +23,7 @@ fn main() {
     let fun = ast.append(Node::FnLiteral(proto, block));
     let _ = ast.declare(Decl::with_expr("fizz".into(), fun));
 
-    let for_typing = topological_sort(&ast.decls, |decl| {
-        decl.get_type_deps(&ast).into_iter().collect()
-    });
+    let for_typing = topological_sort(&ast.decls, |decl| decl.get_type_deps(&ast));
     for decl_index in for_typing {
         println!("{}", ast.decls[decl_index].name);
     }

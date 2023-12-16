@@ -1,5 +1,8 @@
+use std::fmt;
 use std::collections::{HashMap, HashSet, VecDeque};
+use derive_more::IsVariant;
 
+#[derive(IsVariant)]
 pub enum Node {
     Ident(String),
     Number(i64),
@@ -10,15 +13,34 @@ pub enum Node {
 }
 
 pub struct Binary {
-    pub op: char,
+    pub op: Oper,
     pub lhs: usize,
     pub rhs: usize,
 }
 
 impl Binary {
-    pub fn new(op: char, lhs: usize, rhs: usize) -> Self {
+    pub fn new(op: Oper, lhs: usize, rhs: usize) -> Self {
         Self { op, lhs, rhs }
     }
+}
+
+#[derive(IsVariant)]
+pub enum Oper {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+
+    Eql,
+    Neq,
+    Gtr,
+    Lss,
+    Geq,
+    Leq,
+
+    Shl,
+    Shr,
 }
 
 pub struct Param {
@@ -243,7 +265,7 @@ impl Ast {
 /// Performs topological sort
 pub fn topological_sort<F>(decls: &[Decl], extractor: F) -> Vec<usize>
 where
-    F: Fn(&Decl) -> Vec<usize>,
+    F: Fn(&Decl) -> HashSet<usize>,
 {
     let num_decls = decls.len();
     let mut graph = HashMap::new();
@@ -280,4 +302,26 @@ where
     }
 
     sorted_indices
+}
+
+impl fmt::Display for Oper {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Oper::Add => write!(f, "+"),
+            Oper::Sub => write!(f, "-"),
+            Oper::Mul => write!(f, "*"),
+            Oper::Div => write!(f, "/"),
+            Oper::Rem => write!(f, "%"),
+
+            Oper::Eql => write!(f, "=="),
+            Oper::Neq => write!(f, "!="),
+            Oper::Gtr => write!(f, ">"),
+            Oper::Lss => write!(f, "<"),
+            Oper::Geq => write!(f, ">="),
+            Oper::Leq => write!(f, "<="),
+
+            Oper::Shl => write!(f, "<<"),
+            Oper::Shr => write!(f, ">>"),
+        }
+    }
 }

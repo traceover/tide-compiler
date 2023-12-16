@@ -1,4 +1,6 @@
 use std::ops::Index;
+use std::str::FromStr;
+use derive_more::{IsVariant, Unwrap};
 
 /// TypeId is the underlying value of a Type.
 /// It is an index into the runtime type table
@@ -9,6 +11,7 @@ pub type TypeId = usize;
 /// in the binary executable's runtime type table.
 /// The builtin procedure `type_info` provides a way
 /// to access type info from a TypeId.
+#[derive(IsVariant, Unwrap)]
 pub enum TypeInfo {
     Integer(IntegerType),
     Float(FloatType),
@@ -65,7 +68,7 @@ impl ProcType {
 }
 
 /// A pointer type defines the element or
-/// `pointee` type of a memory address.
+/// 'pointee' type of a memory address.
 /// It can also represent the type of a slice
 /// into an array.
 pub struct PointerType {
@@ -94,15 +97,15 @@ pub struct TypeTable {
 
 impl TypeTable {
     pub fn new() -> Self {
-        Self { infos: Vec::new() }
+        Self { infos: Vec::from(BUILTIN_TYPE_INFOS) }
     }
 
     pub fn get(&self, id: TypeId) -> Option<&TypeInfo> {
         self.infos.get(id)
     }
 
-    pub fn get_builtin(&self, _name: &str) -> TypeInfo {
-        todo!()
+    pub fn get_builtin(&self, name: &str) -> TypeId {
+        name.parse().unwrap()
     }
 }
 
@@ -111,5 +114,72 @@ impl Index<TypeId> for TypeTable {
 
     fn index(&self, type_id: TypeId) -> &Self::Output {
         &self.infos[type_id]
+    }
+}
+
+/// A list of all the primitive, predefined types
+/// available in the language without any imports.
+#[derive(Copy, Clone, PartialEq)]
+pub enum BuiltinType {
+    Int,
+    Uint,
+    Float,
+    String,
+    Bool,
+    Void,
+    S8,
+    S16,
+    S32,
+    S64,
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+const BUILTIN_TYPE_INFOS: [TypeInfo; 14] = [
+    TypeInfo::Integer(IntegerType { num_bytes: 8, signed: true }),
+    TypeInfo::Integer(IntegerType { num_bytes: 8, signed: false }),
+    TypeInfo::Float(FloatType::Float),
+    TypeInfo::String,
+    TypeInfo::Bool,
+    TypeInfo::Void,
+    TypeInfo::Integer(IntegerType { num_bytes: 1, signed: true }),
+    TypeInfo::Integer(IntegerType { num_bytes: 2, signed: true }),
+    TypeInfo::Integer(IntegerType { num_bytes: 4, signed: true }),
+    TypeInfo::Integer(IntegerType { num_bytes: 8, signed: true }),
+    TypeInfo::Integer(IntegerType { num_bytes: 1, signed: false }),
+    TypeInfo::Integer(IntegerType { num_bytes: 2, signed: false }),
+    TypeInfo::Integer(IntegerType { num_bytes: 4, signed: false }),
+    TypeInfo::Integer(IntegerType { num_bytes: 8, signed: false }),
+];
+
+impl From<BuiltinType> for TypeId {
+    fn from(value: BuiltinType) -> Self {
+        value as Self
+    }
+}
+
+impl FromStr for BuiltinType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "int" => Ok(Self::Int),
+            "uint" => Ok(Self::Uint),
+            "float" => Ok(Self::Float),
+            "string" => Ok(Self::String),
+            "bool" => Ok(Self::Bool),
+            "void" => Ok(Self::Void),
+            "s8" => Ok(Self::S8),
+            "s16" => Ok(Self::S16),
+            "s32" => Ok(Self::S32),
+            "s64" => Ok(Self::S64),
+            "u8" => Ok(Self::U8),
+            "u16" => Ok(Self::U16),
+            "u32" => Ok(Self::U32),
+            "u64" => Ok(Self::U64),
+            _ => Err(()),
+        }
     }
 }
