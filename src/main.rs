@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::Write;
 
 enum Node {
     Ident(String),
@@ -35,13 +34,13 @@ impl Param {
 
 struct Decl {
     name: String,
-    type_defn: usize,
+    type_defn: Option<usize>,
     root_expr: usize,
     nodes: Vec<usize>,
 }
 
 impl Decl {
-    fn new(name: String, type_defn: usize, root_expr: usize) -> Self {
+    fn new(name: String, type_defn: Option<usize>, root_expr: usize) -> Self {
         Self {
             name,
             type_defn,
@@ -51,18 +50,8 @@ impl Decl {
     }
 
     #[inline]
-    fn with_name(name: String) -> Self {
-        Self::new(name, 0, 0)
-    }
-
-    #[inline]
-    fn with_type(name: String, type_defn: usize) -> Self {
-        Self::new(name, type_defn, 0)
-    }
-
-    #[inline]
     fn with_expr(name: String, root_expr: usize) -> Self {
-        Self::new(name, 0, root_expr)
+        Self::new(name, None, root_expr)
     }
 
     /// Iterates all identifiers in the Decl's syntax tree
@@ -87,13 +76,16 @@ impl Decl {
         Ok(items)
     }
 
-    /// Returns a vector containing the indices of all
+    /// Returns a set containing the indices of all
     /// declarations whose type must be inferred before
     /// this declaration.
     fn get_type_deps(&self, ast: &Ast) -> HashSet<usize> {
         let mut deps = HashSet::new();
         let mut stack = VecDeque::new();
 
+        if let Some(type_defn) = self.type_defn {
+            stack.push_back(type_defn);
+        }
         stack.push_back(self.root_expr);
 
         while let Some(index) = stack.pop_front() {
@@ -123,6 +115,22 @@ impl Decl {
             }
         }
 
+        deps
+    }
+
+    /// Returns a set containing the id of all
+    /// declarations that need to have bytecode generated
+    /// before this declaration.
+    fn get_build_deps(&self, ast: &Ast) -> HashSet<usize> {
+        let mut deps = HashSet::new();
+        ast.visit(self.root_expr, |index| match &ast.nodes[index] {
+            Node::Ident(name) => {
+                if let Some(&id) = ast.members.get(name) {
+                    deps.insert(id);
+                }
+            }
+            _ => {}
+        });
         deps
     }
 }
@@ -293,6 +301,14 @@ fn main() {
     let fun = ast.append(Node::FnLiteral(proto, block));
     let _ = ast.declare(Decl::with_expr("fizz".into(), fun));
 
+    let for_typing = topological_sort(&ast.decls, |decl| {
+        decl.get_type_deps(&ast).into_iter().collect()
+    });
+    for decl_index in for_typing {
+        println!("{}", ast.decls[decl_index].name);
+    }
+
+    /*
     for decl in &ast.decls {
         let deps = decl.get_type_deps(&ast);
         println!("{} :: {}", decl.name, ast.display(decl.root_expr));
@@ -300,4 +316,5 @@ fn main() {
             println!("    {}", ast.decls[dep].name);
         }
     }
+    */
 }
