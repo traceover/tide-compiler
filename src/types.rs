@@ -1,3 +1,5 @@
+use std::ops::Index;
+
 /// TypeId is the underlying value of a Type.
 /// It is an index into the runtime type table
 /// and can be used to compare types.
@@ -8,7 +10,7 @@ pub type TypeId = usize;
 /// The builtin procedure `type_info` provides a way
 /// to access type info from a TypeId.
 pub enum TypeInfo {
-    Int(IntType),
+    Integer(IntegerType),
     Float(FloatType),
     Bool,
     String,
@@ -20,12 +22,12 @@ pub enum TypeInfo {
 }
 
 /// Represents common types such as `int` or `i64`.
-pub struct IntType {
-    num_bytes: u32,
-    signed: bool,
+pub struct IntegerType {
+    pub num_bytes: u32,
+    pub signed: bool,
 }
 
-impl IntType {
+impl IntegerType {
     pub fn new(num_bytes: u32, signed: bool) -> Self {
         Self { num_bytes, signed }
     }
@@ -45,8 +47,8 @@ pub enum FloatType {
 /// a procedure, defining the arity and types
 /// of arguments to be passed, as well as the result.
 pub struct ProcType {
-    params: Vec<(String, TypeId)>,
-    result: TypeId,
+    pub params: Vec<(String, TypeId)>,
+    pub result: TypeId,
 }
 
 impl ProcType {
@@ -67,14 +69,47 @@ impl ProcType {
 /// It can also represent the type of a slice
 /// into an array.
 pub struct PointerType {
-    element: TypeId,
-    slice: bool,
+    pub element: TypeId,
+    pub slice: bool,
 }
 
 /// A fixed-size list of items with the same type.
 /// If `count` is zero the type represents a
 /// dynamic array.
 pub struct ArrayType {
-    element: TypeId,
-    count: u64,
+    pub element: TypeId,
+    pub count: u64,
+}
+
+impl TypeInfo {
+    pub fn is_number(&self) -> bool {
+        matches!(self, TypeInfo::Integer(_) | TypeInfo::Float(_))
+    }
+}
+
+/// Stores type information for every type in the program.
+pub struct TypeTable {
+    infos: Vec<TypeInfo>,
+}
+
+impl TypeTable {
+    pub fn new() -> Self {
+        Self { infos: Vec::new() }
+    }
+
+    pub fn get(&self, id: TypeId) -> Option<&TypeInfo> {
+        self.infos.get(id)
+    }
+
+    pub fn get_builtin(&self, _name: &str) -> TypeInfo {
+        todo!()
+    }
+}
+
+impl Index<TypeId> for TypeTable {
+    type Output = TypeInfo;
+
+    fn index(&self, type_id: TypeId) -> &Self::Output {
+        &self.infos[type_id]
+    }
 }
