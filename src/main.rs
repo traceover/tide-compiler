@@ -3,9 +3,11 @@ pub mod constant;
 pub mod infer;
 pub mod program;
 pub mod types;
+pub mod bytecode;
 
 use ast::*;
 use infer::Infer;
+use bytecode::{Opcode, Inst, Interp};
 use program::ProgramContext;
 use types::BuiltinType;
 
@@ -13,6 +15,28 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 fn main() {
+    let mut ast = Ast::new();
+
+    let a = ast.append(Node::Number(1.into()));
+    let b = ast.append(Node::Number(2.into()));
+    let c = ast.append(Node::Number(3.into()));
+
+    let a_b = ast.append(Node::Binary(Binary::new(Oper::Add, a, b)));
+    let bin = ast.append(Node::Binary(Binary::new(Oper::Add, a_b, c)));
+
+    println!("{}", ast.display(bin));
+    println!();
+
+    let mut interp = Interp::new(Vec::new());
+    interp.add_instructions(&ast, bin, 0);
+    interp.run();
+
+    for (reg, value) in interp.registers {
+        println!("{} = {}", reg, value);
+    }
+}
+
+fn main2() {
     let mut ast = Ast::new();
 
     let num = ast.append(Node::Number(711.into()));
@@ -41,4 +65,17 @@ fn main() {
     let _ = Infer::infer(program_context, &ast).map_err(|err| {
         eprintln!("ERROR: {err:?}");
     });
+
+    let program = vec![
+        Inst::new(Opcode::Constant, 0, 0, 0),
+        Inst::new(Opcode::Constant, 1, 1, 0),
+        Inst::new(Opcode::Add, 0, 1, 0),
+        Inst::new(Opcode::Constant, 1, 2, 0),
+        Inst::new(Opcode::Add, 0, 1, 0),
+        Inst::new(Opcode::Debug, 0, 0, 0),
+    ];
+    for inst in &program {
+        println!("{}", inst);
+    }
+    Interp::interp(program);
 }
