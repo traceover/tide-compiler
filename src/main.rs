@@ -22,7 +22,7 @@ fn main() {
     let rhs = ast.append(Node::Number(2.into()));
     let bin = ast.append(Node::Binary(Binary::new(Oper::Mul, lhs, rhs)));
 
-    let int_ty = ast.append(Node::BuiltinType(BuiltinType::Int));
+    let int_ty = ast.append(Node::BuiltinType(BuiltinType::S32));
     let proto = ast.append(Node::FnProto(FnProto::new(Vec::new(), int_ty)));
     let ret = ast.append(Node::Return(Some(bin)));
     let block = ast.append(Node::Block(Block::new(vec![ret])));

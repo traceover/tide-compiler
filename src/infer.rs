@@ -148,7 +148,27 @@ impl<'a> Infer<'a> {
             _ => return Err(InferError::InvalidFnProto),
         };
 
-        self.match_types(fn_lit.block, proc_info.result)?;
+        let mut return_values = Vec::new();
+
+        self.ast.visit(fn_lit.block, |node_index| {
+            match &self.ast.nodes[node_index] {
+                Node::Return(result) => return_values.push(*result),
+                _ => {}
+            }
+        });
+
+        for result in return_values {
+            match result {
+                Some(result) => self.match_types(result, proc_info.result)?,
+                None => {
+                    // If the procedure is not void, detect empty return
+                    if !self.context.borrow().table[proc_info.result].is_void() {
+                        return Err(InferError::MissingReturnValue { expect: proc_info.result });
+                    }
+                }
+            }
+        }
+
         Ok(type_id)
     }
 
@@ -156,27 +176,10 @@ impl<'a> Infer<'a> {
     /// the implicit return statement at the end of the block if it
     /// exists) and ensures that they all have the same type.
     pub fn infer_block(&self, block: &Block) -> Result<TypeId> {
-        // Extract the result type from all return statements in the block
-        let process_node = |index: &usize| {
-            match &self.ast.nodes[*index] {
-                Node::Return(x) => Some(
-                    x.and_then(|x| self.types.get(&x))
-                        .unwrap_or(&(BuiltinType::Void as TypeId)),
-                ),
-                Node::Block(_) => self.types.get(index), // Add nested blocks as well
-                _ => None,
-            }
-        };
-
-        let results: Vec<_> = block.stmts.iter().filter_map(process_node).collect();
-
-        // Check if all results are the same
-        Ok(*results
-            .windows(2)
-            .all(|window| window[0] == window[1])
-            .then(|| results.first().cloned())
-            .flatten()
-            .unwrap_or(&(BuiltinType::Void as TypeId)))
+        Ok(*block.stmts.last().and_then(|stmt| match &self.ast.nodes[*stmt] {
+            Node::ImplicitReturn(result) => self.types.get(result),
+            _ => None,
+        }).unwrap_or(&(BuiltinType::Void as TypeId)))
     }
 
     pub fn infer_node(&mut self, node_index: NodeId) -> Result<TypeId> {
@@ -215,6 +218,7 @@ impl<'a> Infer<'a> {
                 Ok(BuiltinType::Type as TypeId)
             }
             Node::Return(Some(x)) => Ok(*self.types.get(&x).unwrap()),
+            Node::ImplicitReturn(x) => Ok(*self.types.get(&x).unwrap()),
             Node::Return(None) => Ok(BuiltinType::Void as TypeId),
         }
     }
@@ -287,7 +291,13 @@ impl<'a> Infer<'a> {
                 ) if a != b => Err(InferError::SignednessMismatch),
                 (TypeInfo::Integer(_), TypeInfo::Bool) => Err(InferError::ImplicitIntToBool),
                 (TypeInfo::Float(_), TypeInfo::Integer(_)) => Err(InferError::ImplicitFloatToInt),
-                _ => Err(InferError::TypeMismatch { actual, expect }),
+                _ => {
+                    if let Some(constant) = self.constants.get(&node) {
+                        return self.match_const_to_type(constant, expect);
+                    }
+
+                    Err(InferError::TypeMismatch { actual, expect })
+                }
             };
         }
 
@@ -410,4 +420,7 @@ pub enum InferError {
     },
     InvalidTypeDefn,
     InvalidFnProto,
+    MissingReturnValue {
+        expect: TypeId,
+    },
 }

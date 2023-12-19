@@ -16,6 +16,7 @@ pub enum Node {
     Block(Block),
     BuiltinType(BuiltinType),
     Return(Option<NodeId>),
+    ImplicitReturn(NodeId),
 }
 
 #[derive(Debug, Copy, Clone, Constructor)]
@@ -158,6 +159,9 @@ impl Decl {
                 Node::Return(Some(x)) => {
                     stack.push_back(*x);
                 }
+                Node::ImplicitReturn(x) => {
+                    stack.push_back(*x);
+                }
             }
         }
 
@@ -261,6 +265,9 @@ impl Ast {
                     Node::Return(Some(x)) => {
                         stack.push(*x);
                     }
+                    Node::ImplicitReturn(x) => {
+                        stack.push(*x);
+                    }
                 }
             }
         }
@@ -300,6 +307,7 @@ impl Ast {
                 }
                 Node::BuiltinType(builtin) => format!("{}", builtin),
                 Node::Return(Some(result)) => format!("return {}", self.display(*result)),
+                Node::ImplicitReturn(result) => format!("return {}", self.display(*result)),
                 Node::Return(None) => "return".into(),
             }
         } else {
