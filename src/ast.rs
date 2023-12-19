@@ -1,30 +1,29 @@
-use std::fmt;
+use crate::types::BuiltinType;
+use derive_more::{Constructor, IsVariant};
 use std::collections::{HashMap, HashSet, VecDeque};
-use derive_more::IsVariant;
+use std::fmt;
 
-#[derive(IsVariant)]
+pub type NodeId = usize;
+
+#[derive(Debug, Clone, IsVariant)]
 pub enum Node {
     Ident(String),
     Number(i64),
     Binary(Binary),
-    FnProto(Vec<Param>, usize),
-    FnLiteral(usize, usize),
-    Block(Vec<usize>),
+    FnProto(FnProto),
+    FnLiteral(FnLiteral),
+    Block(Vec<NodeId>),
+    BuiltinType(BuiltinType),
 }
 
+#[derive(Debug, Copy, Clone, Constructor)]
 pub struct Binary {
     pub op: Oper,
-    pub lhs: usize,
-    pub rhs: usize,
+    pub lhs: NodeId,
+    pub rhs: NodeId,
 }
 
-impl Binary {
-    pub fn new(op: Oper, lhs: usize, rhs: usize) -> Self {
-        Self { op, lhs, rhs }
-    }
-}
-
-#[derive(IsVariant)]
+#[derive(Debug, Copy, Clone, IsVariant)]
 pub enum Oper {
     Add,
     Sub,
@@ -43,26 +42,38 @@ pub enum Oper {
     Shr,
 }
 
+#[derive(Debug, Clone, Constructor)]
+pub struct FnProto {
+    pub params: Vec<Param>,
+    pub result: NodeId,
+}
+
+#[derive(Debug, Clone, Constructor)]
 pub struct Param {
     pub name: String,
-    pub type_defn: usize,
+    pub type_defn: NodeId,
 }
 
-impl Param {
-    pub fn new(name: String, type_defn: usize) -> Self {
-        Self { name, type_defn }
-    }
+/// Represents the syntax tree for the node `(x: int) -> int { x * 2 }`.
+#[derive(Debug, Copy, Clone, Constructor)]
+pub struct FnLiteral {
+    pub type_defn: NodeId,
+    pub block: NodeId,
 }
 
+#[derive(Debug, Clone)]
 pub struct Decl {
     pub name: String,
-    pub type_defn: Option<usize>,
-    pub root_expr: usize,
-    pub nodes: Vec<usize>,
+
+    /// If the Decl has an explicit type annotation
+    pub type_defn: Option<NodeId>,
+
+    pub root_expr: NodeId,
+    pub nodes: Vec<NodeId>,
 }
 
 impl Decl {
-    pub fn new(name: String, type_defn: Option<usize>, root_expr: usize) -> Self {
+    pub fn new(name: String, type_defn: Option<NodeId>, root_expr: NodeId) -> Self {
         Self {
             name,
             type_defn,
@@ -72,14 +83,15 @@ impl Decl {
     }
 
     #[inline]
-    pub fn with_expr(name: String, root_expr: usize) -> Self {
+    pub fn with_expr(name: String, root_expr: NodeId) -> Self {
         Self::new(name, None, root_expr)
     }
 
     /// Iterates all identifiers in the Decl's syntax tree
     /// and finds the corresponding entry, returning a list of
     /// Decl ids or an error if an identifier is not defined.
-    fn resolve_idents(&self, ast: &Ast) -> Result<Vec<usize>, usize> {
+    #[allow(dead_code)]
+    fn resolve_idents(&self, ast: &Ast) -> Result<Vec<usize>, NodeId> {
         let mut items = Vec::new();
         for &index in &self.nodes {
             if let Some(node) = ast.nodes.get(index) {
@@ -122,18 +134,19 @@ impl Decl {
                     stack.push_back(bin.lhs);
                     stack.push_back(bin.rhs);
                 }
-                Node::FnProto(params, result) => {
+                Node::FnProto(FnProto { params, result }) => {
                     for param in params {
                         stack.push_back(param.type_defn);
                     }
                     stack.push_back(*result);
                 }
-                Node::FnLiteral(type_defn, _block) => {
+                Node::FnLiteral(FnLiteral { type_defn, .. }) => {
                     stack.push_back(*type_defn);
                 }
                 Node::Block(stmts) => {
                     stack.extend(stmts);
                 }
+                Node::BuiltinType(_) => {}
             }
         }
 
@@ -173,7 +186,7 @@ impl Ast {
     }
 
     /// Add a new Node to the tree and return its id.
-    pub fn append(&mut self, node: Node) -> usize {
+    pub fn append(&mut self, node: Node) -> NodeId {
         let id = self.nodes.len();
         self.nodes.push(node);
         id
@@ -191,26 +204,40 @@ impl Ast {
     }
 
     /// Calls the function `f` with each child node of a tree.
-    pub fn visit<F>(&self, start: usize, mut visitor: F)
+    pub fn visit<F>(&self, start: NodeId, mut visitor: F)
     where
-        F: FnMut(usize),
+        F: FnMut(NodeId),
     {
         let mut stack = vec![start];
-        while let Some(index) = stack.pop() {
+        let mut visited = HashSet::new();
+
+        while let Some(index) = stack.last().cloned() {
+            if visited.contains(&index) {
+                stack.pop();
+                visitor(index);
+                continue;
+            }
+
+            visited.insert(index);
+
             if let Some(node) = self.nodes.get(index) {
                 match node {
-                    Node::Ident(_) | Node::Number(_) => {}
+                    Node::Ident(_) | Node::Number(_) | Node::BuiltinType(_) => {
+                        // Leaf nodes, visit immediately
+                        stack.pop();
+                        visitor(index);
+                    },
                     Node::Binary(Binary { lhs, rhs, .. }) => {
                         stack.push(*lhs);
                         stack.push(*rhs);
                     }
-                    Node::FnProto(params, result) => {
+                    Node::FnProto(FnProto { params, result }) => {
                         for param in params {
                             stack.push(param.type_defn);
                         }
                         stack.push(*result);
                     }
-                    Node::FnLiteral(type_defn, block) => {
+                    Node::FnLiteral(FnLiteral { type_defn, block }) => {
                         stack.push(*type_defn);
                         stack.push(*block);
                     }
@@ -218,12 +245,11 @@ impl Ast {
                         stack.extend(stmts);
                     }
                 }
-                visitor(index);
             }
         }
     }
 
-    pub fn display(&self, index: usize) -> String {
+    pub fn display(&self, index: NodeId) -> String {
         if let Some(node) = self.nodes.get(index) {
             match node {
                 Node::Ident(name) => name.clone(),
@@ -233,7 +259,7 @@ impl Ast {
                     let rhs = self.display(bin.rhs);
                     format!("{} {} {}", lhs, bin.op, rhs)
                 }
-                Node::FnProto(params, result) => {
+                Node::FnProto(FnProto { params, result }) => {
                     let params = params
                         .iter()
                         .map(|par| format!("{}: {}", par.name, self.display(par.type_defn)))
@@ -242,7 +268,7 @@ impl Ast {
                     let result = self.display(*result);
                     format!("({}) -> {}", params, result)
                 }
-                Node::FnLiteral(type_defn, block) => {
+                Node::FnLiteral(FnLiteral { type_defn, block }) => {
                     let type_defn = self.display(*type_defn);
                     let block = self.display(*block);
                     format!("{} {}", type_defn, block)
@@ -255,6 +281,7 @@ impl Ast {
                         .join(", ");
                     format!("{{ {} }}", stmts)
                 }
+                Node::BuiltinType(builtin) => format!("{}", builtin),
             }
         } else {
             format!("(Invalid index: {})", index)
