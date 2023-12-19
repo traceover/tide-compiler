@@ -1,6 +1,6 @@
 use crate::types::BuiltinType;
-use num_bigint::BigInt;
 use derive_more::{Constructor, IsVariant, Unwrap};
+use num_bigint::BigInt;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 

@@ -1,8 +1,8 @@
 use crate::types::TypeId;
-use std::ops::{Add, Sub, Mul, Div, Rem, Shl, Shr};
 use derive_more::{IsVariant, Unwrap};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
+use std::ops::{Add, Div, Mul, Rem, Shl, Shr, Sub};
 
 #[derive(Debug, Clone, IsVariant, Unwrap)]
 pub enum Const {

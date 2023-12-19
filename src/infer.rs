@@ -3,6 +3,7 @@ use crate::constant::Const;
 use crate::program::ProgramContext;
 use crate::types::*;
 
+use num_traits::ToPrimitive;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -38,7 +39,7 @@ impl<'a> Infer<'a> {
     }
 
     /// The type of an identifier is the type of the declaration it refers to.
-    pub fn infer_ident(&mut self, node_index: usize, ident: &String) -> Result<TypeId> {
+    pub fn infer_ident(&mut self, node_index: NodeId, ident: &String) -> Result<TypeId> {
         let context = self.context.borrow();
         let decl = context.lookup_decl(ident).expect("Undeclared identifier");
         if let Some(constant) = &decl.constant {
@@ -51,14 +52,15 @@ impl<'a> Infer<'a> {
     /// of inferring surrounding nodes can overwrite it. For example, if you
     /// write a procedure that returns the type `s32`, the expression `return 5`
     /// would compile, even though `5` would default to `int`.
-    pub fn infer_number(&self, node_index: usize) -> Result<TypeId> {
-        Ok(*self
+    pub fn infer_number(&self, node_index: NodeId) -> Result<TypeId> {
+        Ok(self
             .types
             .get(&node_index)
-            .unwrap_or(&(BuiltinType::Int as TypeId)))
+            .cloned()
+            .unwrap_or(BuiltinType::Int as TypeId))
     }
 
-    pub fn infer_binary(&self, bin: &Binary) -> Result<TypeId> {
+    pub fn infer_binary(&mut self, bin: &Binary) -> Result<TypeId> {
         match bin.op {
             Oper::Add | Oper::Sub | Oper::Mul | Oper::Div => {
                 // All number types (int, float, enum?) are allowed
@@ -126,7 +128,7 @@ impl<'a> Infer<'a> {
     /// Compares the sides of a binary node, returning an error
     /// if they do not match or if both have no type or the type
     /// of both sides if they match.
-    fn get_matching_binary_type(&self, bin: &Binary) -> Result<TypeId> {
+    fn get_matching_binary_type(&mut self, bin: &Binary) -> Result<TypeId> {
         match (self.types.get(&bin.lhs), self.types.get(&bin.rhs)) {
             (Some(a), Some(b)) if a != b => Err(InferError::BinaryMismatch),
             (Some(&type_id), _) => self.match_types(bin.rhs, type_id).map(|_| type_id),
@@ -140,7 +142,7 @@ impl<'a> Infer<'a> {
     /// so that the return type does not have to be specified. But,
     /// lambdas already cannot be recursive so there is no circular problem
     /// if we just block on both the signature and body expression.
-    pub fn infer_fn_literal(&self, fn_lit: &FnLiteral) -> Result<TypeId> {
+    pub fn infer_fn_literal(&mut self, fn_lit: &FnLiteral) -> Result<TypeId> {
         let type_id = self.get_type_defn_type_id(fn_lit.type_defn).unwrap();
 
         let proc_info = match &self.context.borrow().table[type_id] {
@@ -163,7 +165,9 @@ impl<'a> Infer<'a> {
                 None => {
                     // If the procedure is not void, detect empty return
                     if !self.context.borrow().table[proc_info.result].is_void() {
-                        return Err(InferError::MissingReturnValue { expect: proc_info.result });
+                        return Err(InferError::MissingReturnValue {
+                            expect: proc_info.result,
+                        });
                     }
                 }
             }
@@ -172,14 +176,17 @@ impl<'a> Infer<'a> {
         Ok(type_id)
     }
 
-    /// Traverses all return statements in the block (which includes
-    /// the implicit return statement at the end of the block if it
-    /// exists) and ensures that they all have the same type.
+    /// If a block is used as an expression, its type is either void
+    /// or the type of the last statement in the block (if no semicolon).
     pub fn infer_block(&self, block: &Block) -> Result<TypeId> {
-        Ok(*block.stmts.last().and_then(|stmt| match &self.ast.nodes[*stmt] {
-            Node::ImplicitReturn(result) => self.types.get(result),
-            _ => None,
-        }).unwrap_or(&(BuiltinType::Void as TypeId)))
+        Ok(block
+            .stmts
+            .last()
+            .and_then(|stmt| match &self.ast.nodes[*stmt] {
+                Node::ImplicitReturn(result) => self.types.get(result).cloned(),
+                _ => None,
+            })
+            .unwrap_or(BuiltinType::Void as TypeId))
     }
 
     pub fn infer_node(&mut self, node_index: NodeId) -> Result<TypeId> {
@@ -196,15 +203,18 @@ impl<'a> Infer<'a> {
                 self.constants.insert(node_index, Const::Int(x.into()));
                 self.infer_number(node_index)
             }
-            Node::Binary(inner) => {
-                self.infer_binary(&inner).map(|res| {
-                    if let (Some(lhs), Some(rhs)) = (self.constants.get(&inner.lhs), self.constants.get(&inner.rhs)) {
-                        let constant = self.eval_binary(inner.op, lhs.clone(), rhs.clone()).unwrap();
-                        self.constants.insert(node_index, constant);
-                    }
-                    res
-                })
-            }
+            Node::Binary(inner) => self.infer_binary(&inner).map(|res| {
+                if let (Some(lhs), Some(rhs)) = (
+                    self.constants.get(&inner.lhs),
+                    self.constants.get(&inner.rhs),
+                ) {
+                    let constant = self
+                        .eval_binary(inner.op, lhs.clone(), rhs.clone())
+                        .unwrap();
+                    self.constants.insert(node_index, constant);
+                }
+                res
+            }),
             Node::FnProto(inner) => {
                 let info = self.check_fn_proto(&inner)?;
                 self.set_info_for_type_defn(node_index, info);
@@ -217,9 +227,8 @@ impl<'a> Infer<'a> {
                     .insert(node_index, Const::Type(builtin as TypeId));
                 Ok(BuiltinType::Type as TypeId)
             }
-            Node::Return(Some(x)) => Ok(*self.types.get(&x).unwrap()),
+            Node::Return(_) => Ok(BuiltinType::Void as TypeId),
             Node::ImplicitReturn(x) => Ok(*self.types.get(&x).unwrap()),
-            Node::Return(None) => Ok(BuiltinType::Void as TypeId),
         }
     }
 
@@ -246,7 +255,11 @@ impl<'a> Infer<'a> {
                 global_decl.constant = self.constants.get(&decl.root_expr).cloned();
             })
             .expect("Decl must exist");
-        println!("INFO: {} => {}", decl.name, self.context.borrow().table.display(*type_id));
+        println!(
+            "INFO: {} => {}",
+            decl.name,
+            self.context.borrow().table.display(*type_id)
+        );
         Ok(())
     }
 
@@ -254,7 +267,7 @@ impl<'a> Infer<'a> {
     /// but additional validation is required to ensure
     /// the types of its parameters evaluate to type `Type`
     /// as well.
-    pub fn check_fn_proto(&self, proto: &FnProto) -> Result<TypeInfo> {
+    pub fn check_fn_proto(&mut self, proto: &FnProto) -> Result<TypeInfo> {
         let mut params = Vec::new();
         for param in &proto.params {
             self.match_types(param.type_defn, BuiltinType::Type as TypeId)?;
@@ -277,38 +290,47 @@ impl<'a> Infer<'a> {
         self.constants.insert(node_index, Const::Type(type_id));
     }
 
-    pub fn match_types(&self, node: NodeId, expect: TypeId) -> Result<()> {
+    pub fn match_types(&mut self, node: NodeId, expect: TypeId) -> Result<()> {
         if let Some(&actual) = self.types.get(&node) {
             if actual == expect {
                 return Ok(());
             }
 
+            use TypeInfo::*;
+
             let table = &self.context.borrow().table;
             return match (&table[actual], &table[expect]) {
-                (
-                    TypeInfo::Integer(IntegerType { signed: a, .. }),
-                    TypeInfo::Integer(IntegerType { signed: b, .. }),
-                ) if a != b => Err(InferError::SignednessMismatch),
-                (TypeInfo::Integer(_), TypeInfo::Bool) => Err(InferError::ImplicitIntToBool),
-                (TypeInfo::Float(_), TypeInfo::Integer(_)) => Err(InferError::ImplicitFloatToInt),
+                (Integer(a), Integer(b)) if a.signed != b.signed => {
+                    Err(InferError::SignednessMismatch)
+                }
+                (Integer(_), Bool) => {
+                    Err(InferError::ImplicitIntToBool)
+                }
+                (Float(_), Integer(_)) => {
+                    Err(InferError::ImplicitFloatToInt)
+                }
                 _ => {
                     if let Some(constant) = self.constants.get(&node) {
-                        return self.match_const_to_type(constant, expect);
+                        let constant = self.match_const_to_type(constant, expect)?;
+                        self.constants.insert(node, constant);
+                        Ok(())
+                    } else {
+                        Err(InferError::TypeMismatch { actual, expect })
                     }
-
-                    Err(InferError::TypeMismatch { actual, expect })
                 }
             };
         }
 
         if let Some(constant) = self.constants.get(&node) {
-            return self.match_const_to_type(constant, expect);
+            let constant = self.match_const_to_type(constant, expect)?;
+            self.constants.insert(node, constant);
+            return Ok(());
         }
 
         Err(InferError::CannotInferExpr { expect })
     }
 
-    pub fn match_const_to_type(&self, constant: &Const, expect: TypeId) -> Result<()> {
+    pub fn match_const_to_type(&self, constant: &Const, expect: TypeId) -> Result<Const> {
         let info = &self.context.borrow().table[expect];
         match (constant, info) {
             (Const::Int(x), TypeInfo::Integer(IntegerType { num_bytes, signed })) => {
@@ -322,12 +344,12 @@ impl<'a> Infer<'a> {
                 if bits > max_bits {
                     return Err(InferError::IntPrecisionLoss { bits, max_bits });
                 } else {
-                    Ok(())
+                    Ok(constant.clone())
                 }
             }
-            (Const::Int(_), TypeInfo::Float(_)) => Ok(()),
+            (Const::Int(x), TypeInfo::Float(_)) => Ok(Const::Float(x.to_f64().unwrap())),
             (Const::Int(_), _) => Err(InferError::ImplicitIntCast { expect }), // Int cannot cast to any other type
-            (Const::Float(_), TypeInfo::Float(_)) => Ok(()),
+            (Const::Float(_), TypeInfo::Float(_)) => Ok(constant.clone()),
             (Const::Bool(_), _) => Err(InferError::ImplicitBoolCast { expect }), // Bool cannot cast to any other type
             (Const::Type(_), _) => Err(InferError::ImplicitTypeCast { expect }), // Type cannot cast to any other type
             (Const::Float(_), _) => Err(InferError::ImplicitFloatCast { expect }), // Float cannot cast to any other type
@@ -352,7 +374,8 @@ impl<'a> Infer<'a> {
                                 }
                             })
                         })
-                        .collect()
+                        .collect::<Result<Vec<_>>>()
+                        .map(|fields| Const::Struct(fields))
                 } else {
                     Err(InferError::InvalidStructLiteral { expect })
                 }
