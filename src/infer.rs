@@ -13,9 +13,9 @@ use std::result;
 pub type Result<T> = result::Result<T, InferError>;
 
 pub struct Infer<'a> {
-    ast: &'a Ast,
-    types: HashMap<usize, TypeId>,
-    constants: HashMap<usize, Const>,
+    pub ast: &'a Ast,
+    pub types: HashMap<usize, TypeId>,
+    pub constants: HashMap<usize, Const>,
     context: Rc<RefCell<ProgramContext>>,
 }
 
@@ -236,11 +236,6 @@ impl<'a> Infer<'a> {
         let decl = self.ast.decls[decl_index].clone();
         for &node_index in &decl.nodes {
             let type_id = self.infer_node(node_index)?;
-            println!(
-                "INFO: {} => {}",
-                self.ast.display(node_index),
-                self.context.borrow().table.display(type_id)
-            );
             self.types.insert(node_index, type_id);
         }
         let type_id = self
@@ -255,11 +250,6 @@ impl<'a> Infer<'a> {
                 global_decl.constant = self.constants.get(&decl.root_expr).cloned();
             })
             .expect("Decl must exist");
-        println!(
-            "INFO: {} => {}",
-            decl.name,
-            self.context.borrow().table.display(*type_id)
-        );
         Ok(())
     }
 

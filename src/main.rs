@@ -7,7 +7,7 @@ pub mod bytecode;
 
 use ast::*;
 use infer::Infer;
-use bytecode::{Opcode, Inst, Interp};
+use bytecode::{Inst, Opcode, Interp};
 use program::ProgramContext;
 use types::BuiltinType;
 
@@ -22,25 +22,9 @@ fn main() {
     let c = ast.append(Node::Number(3.into()));
 
     let a_b = ast.append(Node::Binary(Binary::new(Oper::Add, a, b)));
-    let bin = ast.append(Node::Binary(Binary::new(Oper::Add, a_b, c)));
+    let a_b_c = ast.append(Node::Binary(Binary::new(Oper::Add, a_b, c)));
 
-    println!("{}", ast.display(bin));
-    println!();
-
-    let mut interp = Interp::new(Vec::new());
-    interp.add_instructions(&ast, bin, 0);
-    interp.run();
-
-    for (reg, value) in interp.registers {
-        println!("{} = {}", reg, value);
-    }
-}
-
-fn main2() {
-    let mut ast = Ast::new();
-
-    let num = ast.append(Node::Number(711.into()));
-    let _ = ast.declare(Decl::with_expr("ITEM".into(), num));
+    ast.declare(Decl::with_expr("ITEM".into(), a_b_c));
 
     let lhs = ast.append(Node::Ident("ITEM".into()));
     let rhs = ast.append(Node::Number(2.into()));
@@ -51,31 +35,42 @@ fn main2() {
     let ret = ast.append(Node::Return(Some(bin)));
     let block = ast.append(Node::Block(Block::new(vec![ret])));
     let fun = ast.append(Node::FnLiteral(FnLiteral::new(proto, block)));
-    let _ = ast.declare(Decl::with_expr("fizz".into(), fun));
+    ast.declare(Decl::with_expr("fizz".into(), fun));
 
     for decl in &ast.decls {
         println!("{} :: {}", &decl.name, ast.display(decl.root_expr));
     }
-
     println!();
 
     let program_context = Rc::new(RefCell::new(ProgramContext::new()));
     program_context.borrow_mut().insert_ast(&ast);
 
-    let _ = Infer::infer(program_context, &ast).map_err(|err| {
-        eprintln!("ERROR: {err:?}");
-    });
+    let infer = match Infer::infer(program_context, &ast) {
+        Ok(infer) => infer,
+        Err(err) => {
+            eprintln!("ERROR: {err:?}");
+            std::process::exit(1);
+        }
+    };
 
-    let program = vec![
-        Inst::new(Opcode::Constant, 0, 0, 0),
-        Inst::new(Opcode::Constant, 1, 1, 0),
-        Inst::new(Opcode::Add, 0, 1, 0),
-        Inst::new(Opcode::Constant, 1, 2, 0),
-        Inst::new(Opcode::Add, 0, 1, 0),
-        Inst::new(Opcode::Debug, 0, 0, 0),
-    ];
-    for inst in &program {
-        println!("{}", inst);
+    let mut interp = Interp::new(Vec::new());
+    interp.program.push(Inst::new(Opcode::Call, 0, 0, 2));
+    interp.program.push(Inst::new(Opcode::Exit, 0, 0, 0));
+    interp.add_decls(&infer);
+
+    for (name, label) in &interp.labels {
+        println!("{} = {:?}", name, label);
     }
-    Interp::interp(program);
+    println!();
+
+    for inst in &interp.program {
+        println!("{inst}");
+    }
+    println!();
+
+    interp.run();
+
+    for (reg, value) in &interp.registers {
+        println!("{} = {}", reg, value);
+    }
 }

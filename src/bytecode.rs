@@ -1,4 +1,6 @@
 use crate::ast::*;
+use crate::infer::Infer;
+use crate::constant::Const;
 use std::fmt;
 use std::collections::HashMap;
 use derive_more::Constructor;
@@ -61,6 +63,8 @@ pub enum Opcode {
     Return,
     /// Prints the value of a register
     Debug,
+    /// Terminates the program
+    Exit,
 }
 
 #[derive(Copy, Clone, Constructor)]
@@ -73,19 +77,25 @@ pub struct Inst {
 }
 
 pub struct Interp {
-    program: Vec<Inst>,
-    constants: Vec<Word>,
-    // return_stack: Vec<Word>,
+    pub program: Vec<Inst>,
+    pub constants: Vec<Word>,
     pub registers: HashMap<u8, Word>,
+    pub labels: HashMap<String, Label>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Label {
+    Constant(usize),
+    Address(u16),
 }
 
 impl Interp {
     pub fn new(program: Vec<Inst>) -> Self {
         Self {
             program,
-            constants: vec![1, 2, 3],
-            // return_stack: Vec::new(),
+            constants: Vec::new(),
             registers: HashMap::new(),
+            labels: HashMap::new(),
         }
     }
 
@@ -106,6 +116,7 @@ impl Interp {
 
     pub fn run(&mut self) {
         let mut pc = 0;
+        let mut return_stack = Vec::new();
         while let Some(inst) = self.program.get(pc) {
             use Opcode::*;
             match inst.code {
@@ -270,22 +281,71 @@ impl Interp {
                 }
                 Test => {
                     // if (R(A) != (
+                    todo!()
                 }
                 Call => {
+                    return_stack.push(pc + 1);
+
+                    let bx = ((inst.b as u16) << 8) | inst.c as u16;
+                    pc = bx as usize;
                 }
                 Return => {
+                    pc = return_stack.pop().unwrap();
                 }
                 Debug => {
                     println!("{}", self.register(inst.a));
                     pc += 1;
                 }
+                Exit => {
+                    break;
+                }
             }
         }
     }
 
+    pub fn add_decls(&mut self, infer: &Infer) {
+        for decl in &infer.ast.decls {
+            let node = infer.ast.nodes[decl.root_expr].clone();
+            match node {
+                Node::FnLiteral(fn_lit) => {
+                    let addr = self.program.len() as u16;
+                    self.add_instructions(infer.ast, fn_lit.block, 0);
+                    self.labels.insert(decl.name.clone(), Label::Address(addr));
+                }
+                _ => {
+                    if let Some(constant) = infer.constants.get(&decl.root_expr) {
+                        let id = self.add_constant(constant);
+                        self.labels.insert(decl.name.clone(), Label::Constant(id));
+                    } else {
+                        todo!()
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn add_constant(&mut self, constant: &Const) -> usize {
+        let id = self.constants.len();
+        let word = match constant {
+            Const::Int(x) => x.to_u64().unwrap(),
+            Const::Float(x) => unsafe { std::mem::transmute(x) },
+            Const::Bool(x) => *x as u64,
+            Const::Struct(_) => todo!(),
+            Const::Type(x) => *x as u64,
+        };
+        self.constants.push(word);
+        id
+    }
+
     pub fn add_instructions(&mut self, ast: &Ast, node_index: NodeId, reg: u8) {
         match &ast.nodes[node_index] {
-            Node::Ident(_) => todo!(),
+            Node::Ident(name) => {
+                let label = self.labels.get(name).expect("Failed to get label");
+                match label {
+                    Label::Constant(id) => self.program.push(Inst::new(Opcode::Constant, reg, *id as u8, 0)),
+                    Label::Address(_) => todo!(),
+                }
+            }
             Node::Number(x) => {
                 let word = x.to_u64().unwrap();
                 let id = self.constants.len();
@@ -299,12 +359,21 @@ impl Interp {
                         self.add_instructions(ast, bin.rhs, reg + 1);
                         self.program.push(Inst::new(Opcode::Add, reg, reg + 1, reg));
                     }
+                    Oper::Mul => {
+                        self.add_instructions(ast, bin.lhs, reg);
+                        self.add_instructions(ast, bin.rhs, reg + 1);
+                        self.program.push(Inst::new(Opcode::Mul, reg, reg + 1, reg));
+                    }
                     _ => todo!(),
                 }
             }
             Node::FnProto(_) => todo!(),
             Node::FnLiteral(_) => todo!(),
-            Node::Block(_) => todo!(),
+            Node::Block(block) => {
+                for &stmt in &block.stmts {
+                    self.add_instructions(ast, stmt, 0);
+                }
+            }
             Node::BuiltinType(_) => todo!(),
             Node::Return(result) => {
                 if let Some(result) = result {
@@ -393,13 +462,17 @@ impl fmt::Display for Inst {
                 write!(f, "TEST {} {} {}", self.a, self.b, self.c)
             }
             Call => {
-                write!(f, "CALL {}", self.a)
+                let bx = ((self.b as u16) << 8) | self.c as u16;
+                write!(f, "CALL {}", bx)
             }
             Return => {
-                write!(f, "RETURN {}", self.a)
+                write!(f, "RETURN")
             }
             Debug => {
                 write!(f, "DEBUG {}", self.a)
+            }
+            Exit => {
+                write!(f, "EXIT")
             }
         }
     }
