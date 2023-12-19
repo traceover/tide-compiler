@@ -177,6 +177,7 @@ version = "0.1.0"
 dependencies = [
  "derive_more",
  "num-bigint",
+ "num-traits",
  "num_enum",
 ]
 

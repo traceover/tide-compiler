@@ -1,4 +1,5 @@
 use crate::types::BuiltinType;
+use num_bigint::BigInt;
 use derive_more::{Constructor, IsVariant, Unwrap};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -8,7 +9,7 @@ pub type NodeId = usize;
 #[derive(Debug, Clone, IsVariant, Unwrap)]
 pub enum Node {
     Ident(String),
-    Number(i64),
+    Number(BigInt),
     Binary(Binary),
     FnProto(FnProto),
     FnLiteral(FnLiteral),

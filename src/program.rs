@@ -1,5 +1,6 @@
 use crate::ast::Ast;
 use crate::types::{TypeId, TypeTable};
+use crate::constant::Const;
 use std::collections::HashMap;
 
 /// A program context is a list of every declaration from a
@@ -22,8 +23,7 @@ impl ProgramContext {
     /// the program context.
     pub fn insert_ast(&mut self, ast: &Ast) {
         for decl in &ast.decls {
-            self.global_decls
-                .insert(decl.name.clone(), GlobalDecl { type_id: None });
+            self.global_decls.insert(decl.name.clone(), Default::default());
         }
     }
 
@@ -41,7 +41,8 @@ impl ProgramContext {
 
 /// A global reference to a declaration in one of the
 /// files imported by the program.
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Default, Clone)]
 pub struct GlobalDecl {
     pub type_id: Option<TypeId>,
+    pub constant: Option<Const>,
 }

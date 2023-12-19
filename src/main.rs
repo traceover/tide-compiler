@@ -15,11 +15,11 @@ use std::rc::Rc;
 fn main() {
     let mut ast = Ast::new();
 
-    let num = ast.append(Node::Number(711));
+    let num = ast.append(Node::Number(711.into()));
     let _ = ast.declare(Decl::with_expr("ITEM".into(), num));
 
     let lhs = ast.append(Node::Ident("ITEM".into()));
-    let rhs = ast.append(Node::Number(2));
+    let rhs = ast.append(Node::Number(2.into()));
     let bin = ast.append(Node::Binary(Binary::new(Oper::Mul, lhs, rhs)));
 
     let int_ty = ast.append(Node::BuiltinType(BuiltinType::Int));

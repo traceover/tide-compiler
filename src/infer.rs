@@ -38,9 +38,12 @@ impl<'a> Infer<'a> {
     }
 
     /// The type of an identifier is the type of the declaration it refers to.
-    pub fn infer_ident(&self, ident: &String) -> Result<TypeId> {
+    pub fn infer_ident(&mut self, node_index: usize, ident: &String) -> Result<TypeId> {
         let context = self.context.borrow();
         let decl = context.lookup_decl(ident).expect("Undeclared identifier");
+        if let Some(constant) = &decl.constant {
+            self.constants.insert(node_index, constant.clone());
+        }
         Ok(decl.type_id.expect("Declaration not finished"))
     }
 
@@ -86,6 +89,17 @@ impl<'a> Infer<'a> {
                 self.get_matching_binary_type(bin)?;
                 Ok(BuiltinType::Bool as TypeId)
             }
+        }
+    }
+
+    fn eval_binary(&self, op: Oper, lhs: Const, rhs: Const) -> result::Result<Const, &str> {
+        match op {
+            Oper::Add => lhs + rhs,
+            Oper::Sub => lhs - rhs,
+            Oper::Mul => lhs * rhs,
+            Oper::Div => lhs / rhs,
+            Oper::Rem => lhs % rhs,
+            _ => todo!(),
         }
     }
 
@@ -174,12 +188,20 @@ impl<'a> Infer<'a> {
         let node = self.ast.nodes[node_index].clone(); // Clone is cheap because we use indices
 
         match node {
-            Node::Ident(name) => self.infer_ident(&name),
+            Node::Ident(name) => self.infer_ident(node_index, &name),
             Node::Number(x) => {
                 self.constants.insert(node_index, Const::Int(x.into()));
                 self.infer_number(node_index)
             }
-            Node::Binary(inner) => self.infer_binary(&inner),
+            Node::Binary(inner) => {
+                self.infer_binary(&inner).map(|res| {
+                    if let (Some(lhs), Some(rhs)) = (self.constants.get(&inner.lhs), self.constants.get(&inner.rhs)) {
+                        let constant = self.eval_binary(inner.op, lhs.clone(), rhs.clone()).unwrap();
+                        self.constants.insert(node_index, constant);
+                    }
+                    res
+                })
+            }
             Node::FnProto(inner) => {
                 let info = self.check_fn_proto(&inner)?;
                 self.set_info_for_type_defn(node_index, info);
@@ -215,8 +237,12 @@ impl<'a> Infer<'a> {
         self.context
             .borrow_mut()
             .lookup_decl_mut(&decl.name)
-            .expect("Decl must exist")
-            .type_id = Some(*type_id);
+            .map(|global_decl| {
+                global_decl.type_id = Some(*type_id);
+                global_decl.constant = self.constants.get(&decl.root_expr).cloned();
+            })
+            .expect("Decl must exist");
+        println!("INFO: {} => {}", decl.name, self.context.borrow().table.display(*type_id));
         Ok(())
     }
 
