@@ -1,19 +1,20 @@
 use crate::types::BuiltinType;
-use derive_more::{Constructor, IsVariant};
+use derive_more::{Constructor, IsVariant, Unwrap};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
 pub type NodeId = usize;
 
-#[derive(Debug, Clone, IsVariant)]
+#[derive(Debug, Clone, IsVariant, Unwrap)]
 pub enum Node {
     Ident(String),
     Number(i64),
     Binary(Binary),
     FnProto(FnProto),
     FnLiteral(FnLiteral),
-    Block(Vec<NodeId>),
+    Block(Block),
     BuiltinType(BuiltinType),
+    Return(Option<NodeId>),
 }
 
 #[derive(Debug, Copy, Clone, Constructor)]
@@ -59,6 +60,12 @@ pub struct Param {
 pub struct FnLiteral {
     pub type_defn: NodeId,
     pub block: NodeId,
+}
+
+/// A block is a list of statements with an optional implicit return.
+#[derive(Debug, Clone, Constructor)]
+pub struct Block {
+    pub stmts: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -129,7 +136,7 @@ impl Decl {
                         deps.insert(id);
                     }
                 }
-                Node::Number(_) => {}
+                Node::Number(_) | Node::Return(None) => {}
                 Node::Binary(bin) => {
                     stack.push_back(bin.lhs);
                     stack.push_back(bin.rhs);
@@ -143,10 +150,13 @@ impl Decl {
                 Node::FnLiteral(FnLiteral { type_defn, .. }) => {
                     stack.push_back(*type_defn);
                 }
-                Node::Block(stmts) => {
+                Node::Block(Block { stmts }) => {
                     stack.extend(stmts);
                 }
                 Node::BuiltinType(_) => {}
+                Node::Return(Some(x)) => {
+                    stack.push_back(*x);
+                }
             }
         }
 
@@ -222,11 +232,14 @@ impl Ast {
 
             if let Some(node) = self.nodes.get(index) {
                 match node {
-                    Node::Ident(_) | Node::Number(_) | Node::BuiltinType(_) => {
+                    Node::Ident(_)
+                    | Node::Number(_)
+                    | Node::BuiltinType(_)
+                    | Node::Return(None) => {
                         // Leaf nodes, visit immediately
                         stack.pop();
                         visitor(index);
-                    },
+                    }
                     Node::Binary(Binary { lhs, rhs, .. }) => {
                         stack.push(*lhs);
                         stack.push(*rhs);
@@ -241,8 +254,11 @@ impl Ast {
                         stack.push(*type_defn);
                         stack.push(*block);
                     }
-                    Node::Block(stmts) => {
+                    Node::Block(Block { stmts }) => {
                         stack.extend(stmts);
+                    }
+                    Node::Return(Some(x)) => {
+                        stack.push(*x);
                     }
                 }
             }
@@ -273,7 +289,7 @@ impl Ast {
                     let block = self.display(*block);
                     format!("{} {}", type_defn, block)
                 }
-                Node::Block(stmts) => {
+                Node::Block(Block { stmts }) => {
                     let stmts = stmts
                         .iter()
                         .map(|&x| self.display(x))
@@ -282,6 +298,8 @@ impl Ast {
                     format!("{{ {} }}", stmts)
                 }
                 Node::BuiltinType(builtin) => format!("{}", builtin),
+                Node::Return(Some(result)) => format!("return {}", self.display(*result)),
+                Node::Return(None) => "return".into(),
             }
         } else {
             format!("(Invalid index: {})", index)

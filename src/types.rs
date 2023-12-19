@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Index;
-use std::convert::TryFrom;
 use std::str::FromStr;
 
-use derive_more::{Constructor, IsVariant, Unwrap, Display};
+use derive_more::{Constructor, Display, IsVariant, Unwrap};
 use num_enum::TryFromPrimitive;
 
 /// TypeId is the underlying value of a Type.
@@ -15,7 +16,7 @@ pub type TypeId = usize;
 /// in the binary executable's runtime type table.
 /// The builtin procedure `type_info` provides a way
 /// to access type info from a TypeId.
-#[derive(IsVariant, Unwrap)]
+#[derive(Debug, Clone, IsVariant, Unwrap)]
 pub enum TypeInfo {
     Integer(IntegerType),
     Float(FloatType),
@@ -23,13 +24,15 @@ pub enum TypeInfo {
     String,
     Void,
     Procedure(ProcType),
-    Pointer(PointerType),
+    Pointer(TypeId),
+    Slice(TypeId),
     Array(ArrayType),
+    Struct(StructType),
     Type,
 }
 
 /// Represents common types such as `int` or `i64`.
-#[derive(Constructor)]
+#[derive(Debug, Copy, Clone, Constructor, PartialEq)]
 pub struct IntegerType {
     pub num_bytes: u32,
     pub signed: bool,
@@ -45,6 +48,7 @@ impl fmt::Display for IntegerType {
 /// Unlike `IntType`, we do not allow an arbitrary
 /// number of bytes for precision, and instead have
 /// a predefined list of allowed widths.
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum FloatType {
     Half,
     Float,
@@ -55,7 +59,7 @@ pub enum FloatType {
 /// A procedure type is the calling contract of
 /// a procedure, defining the arity and types
 /// of arguments to be passed, as well as the result.
-#[derive(Constructor)]
+#[derive(Debug, Clone, Constructor)]
 pub struct ProcType {
     pub params: Vec<(String, TypeId)>,
     pub result: TypeId,
@@ -70,22 +74,20 @@ impl ProcType {
     }
 }
 
-/// A pointer type defines the element or
-/// 'pointee' type of a memory address.
-/// It can also represent the type of a slice
-/// into an array.
-#[derive(Constructor)]
-pub struct PointerType {
-    pub element: TypeId,
-    pub slice: bool,
-}
-
 /// A fixed-size list of items with the same type.
 /// If `count` is zero the type represents a
 /// dynamic array.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct ArrayType {
     pub element: TypeId,
     pub count: u64,
+}
+
+/// A struct is a collection of named items grouped
+/// together to encapsulate shared data or state.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StructType {
+    pub fields: Vec<(String, TypeId)>,
 }
 
 impl TypeInfo {
@@ -97,17 +99,57 @@ impl TypeInfo {
 /// Stores type information for every type in the program.
 pub struct TypeTable {
     infos: Vec<TypeInfo>,
+
+    // All of these are used for deduplication:
+    pointer_types: HashMap<TypeId, TypeId>, // Maps element type to pointer type id
+    slice_types: HashMap<TypeId, TypeId>,   // Maps element type to slice type id
+    array_types: HashMap<ArrayType, TypeId>, // Maps element type and array length to array type id
 }
 
 impl TypeTable {
     pub fn new() -> Self {
         Self {
             infos: Vec::from(BUILTIN_TYPE_INFOS),
+            pointer_types: HashMap::new(),
+            slice_types: HashMap::new(),
+            array_types: HashMap::new(),
         }
     }
 
-    /// Adds type info to the table and returns the new id.
+    /// Adds type info to the table and returns the new id,
+    /// deduplicating pointer, slice, array, and procedure types.
     pub fn append(&mut self, info: TypeInfo) -> TypeId {
+        use TypeInfo::*;
+
+        // Check if the type already exists in the table
+        let dup_type_id = match &info {
+            Pointer(element) => self.pointer_types.get(element),
+            Slice(element) => self.slice_types.get(element),
+            Array(element) => self.array_types.get(element),
+            _ => None,
+        };
+
+        if let Some(&type_id) = dup_type_id {
+            return type_id;
+        }
+
+        // Type doesn't exist in the maps, so insert it
+        let new_type_id = self.insert(info.clone());
+
+        match info {
+            Pointer(element) => self.pointer_types.insert(element, new_type_id),
+            Slice(element) => self.slice_types.insert(element, new_type_id),
+            Array(array) => self.array_types.insert(array, new_type_id),
+            _ => None,
+        };
+
+        new_type_id
+    }
+
+    /// Inserts a new type info into the table without
+    /// performing any deduplication as is performed by
+    /// the public api function `append`.
+    fn insert(&mut self, info: TypeInfo) -> TypeId {
         let result = self.infos.len() as TypeId;
         self.infos.push(info);
         result
@@ -140,15 +182,25 @@ impl TypeTable {
                     .iter()
                     .map(|(name, type_id)| format!("{}: {}", name, self.display(*type_id)))
                     .collect::<Vec<_>>()
-                    .join(" ");
+                    .join(", ");
                 let result = self.display(proc.result);
                 format!("({}) -> {}", params, result)
             }
-            TypeInfo::Pointer(ptr) => format!("*{}", self.display(ptr.element)),
+            TypeInfo::Pointer(element) => format!("*{}", self.display(*element)),
+            TypeInfo::Slice(element) => format!("[]{}", self.display(*element)),
             TypeInfo::Array(arr) => match arr.count {
                 0 => format!("[..]{}", self.display(arr.element)),
                 _ => format!("[{}]{}", arr.count, self.display(arr.element)),
             },
+            TypeInfo::Struct(struc) => {
+                let fields = struc
+                    .fields
+                    .iter()
+                    .map(|(name, type_id)| format!("{}: {}", name, self.display(*type_id)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("struct {{ {} }}", fields)
+            }
             TypeInfo::Type => "Type".into(),
         }
     }

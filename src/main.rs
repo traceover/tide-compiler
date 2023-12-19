@@ -1,13 +1,13 @@
 pub mod ast;
 pub mod constant;
 pub mod infer;
-pub mod types;
 pub mod program;
+pub mod types;
 
 use ast::*;
-use types::BuiltinType;
 use infer::Infer;
 use program::ProgramContext;
+use types::BuiltinType;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,12 +24,15 @@ fn main() {
 
     let int_ty = ast.append(Node::BuiltinType(BuiltinType::Int));
     let proto = ast.append(Node::FnProto(FnProto::new(Vec::new(), int_ty)));
-    let block = ast.append(Node::Block(vec![bin]));
+    let ret = ast.append(Node::Return(Some(bin)));
+    let block = ast.append(Node::Block(Block::new(vec![ret])));
     let fun = ast.append(Node::FnLiteral(FnLiteral::new(proto, block)));
     let _ = ast.declare(Decl::with_expr("fizz".into(), fun));
 
     let program_context = Rc::new(RefCell::new(ProgramContext::new()));
     program_context.borrow_mut().insert_ast(&ast);
 
-    let _ = Infer::infer(program_context, &ast);
+    let _ = Infer::infer(program_context, &ast).map_err(|err| {
+        eprintln!("ERROR: {err:?}");
+    });
 }

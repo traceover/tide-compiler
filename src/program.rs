@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use crate::ast::Ast;
 use crate::types::{TypeId, TypeTable};
+use std::collections::HashMap;
 
 /// A program context is a list of every declaration from a
 /// list of all imported modules compiled together for the
@@ -22,9 +22,8 @@ impl ProgramContext {
     /// the program context.
     pub fn insert_ast(&mut self, ast: &Ast) {
         for decl in &ast.decls {
-            self.global_decls.insert(decl.name.clone(), GlobalDecl {
-                type_id: None,
-            });
+            self.global_decls
+                .insert(decl.name.clone(), GlobalDecl { type_id: None });
         }
     }
 
