@@ -1,6 +1,7 @@
 use std::fmt;
 use std::path::PathBuf;
 use num_bigint::BigInt;
+use derive_more::IsVariant;
 
 /// A custom location type to represent the location of tokens or errors.
 /// This enum has two variants: `File` and `Str`.
@@ -47,6 +48,8 @@ pub struct Lexer {
 }
 
 impl Lexer {
+    /// Constructs a new `Lexer` instance from the given character vector and optional file path.
+    /// Initializes line number, beginning of line, and current character number to zero.
     pub fn new(chars: Vec<char>, file_path: Option<String>) -> Self {
         Self {
             chars,
@@ -58,6 +61,7 @@ impl Lexer {
         }
     }
 
+    /// Retrieves the current line being analyzed as a vector of characters.
     pub fn current_line(&self) -> Vec<char> {
         let mut eol = self.bol;
         while eol < self.chars.len() && self.chars[eol] != '\n' {
@@ -66,6 +70,7 @@ impl Lexer {
         return self.chars[self.bol..eol].to_vec();
     }
 
+    /// Provides the current location (`Loc`) in the source code, either in a file or a string.
     pub fn loc(&self) -> Loc {
         match &self.file_path {
             Some(file_path) => Loc::File {
@@ -234,7 +239,7 @@ impl Lexer {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, IsVariant)]
 pub enum Token {
     // Literals / multi-char tokens
     Ident(String),
@@ -282,6 +287,13 @@ pub enum Token {
     If,
     Else,
     Then,
+    For,
+    While,
+    Return,
+
+    // Not an actual token, but used in the parser to detect the end
+    // without having to bounds check
+    EndOfFile
 }
 
 pub enum LexError {
@@ -298,9 +310,11 @@ pub enum LexError {
     },
 }
 
+/// Implementing `Iterator` for `Lexer`, where each iteration returns a `Token` and its `Loc`.
 impl Iterator for Lexer {
     type Item = (Token, Loc);
 
+    /// Returns the next `Token` and its `Loc` in the source code, or `None` if the end is reached.
     fn next(&mut self) -> Option<Self::Item> {
         self.trim_whitespace(); // So that the location is correct
         let loc = self.loc();
@@ -318,6 +332,9 @@ fn keyword_by_name(s: &str) -> Option<Token> {
         "if" => Some(Token::If),
         "else" => Some(Token::Else),
         "then" => Some(Token::Then),
+        "for" => Some(Token::For),
+        "while" => Some(Token::While),
+        "return" => Some(Token::Return),
         _ => None,
     }
 }

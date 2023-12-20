@@ -367,6 +367,8 @@ impl Interp {
                     _ => todo!(),
                 }
             }
+            Node::Unary(_) => todo!(),
+            Node::Call(_) => todo!(),
             Node::FnProto(_) => todo!(),
             Node::FnLiteral(_) => todo!(),
             Node::Block(block) => {

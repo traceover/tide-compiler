@@ -78,7 +78,7 @@ impl<'a> Infer<'a> {
                     Err(InferError::InvalidComparison)
                 }
             }
-            Oper::Rem | Oper::Shl | Oper::Shr => {
+            Oper::Rem | Oper::And | Oper::Or | Oper::Xor | Oper::Shl | Oper::Shr => {
                 // Only integer types are allowed
                 if self.both_match(bin.lhs, bin.rhs, TypeInfo::is_integer) {
                     self.get_matching_binary_type(bin)
@@ -90,6 +90,9 @@ impl<'a> Infer<'a> {
                 // Any type can be compared for equality
                 self.get_matching_binary_type(bin)?;
                 Ok(BuiltinType::Bool as TypeId)
+            }
+            Oper::LogicAnd | Oper::LogicOr => {
+                todo!()
             }
         }
     }
@@ -215,6 +218,8 @@ impl<'a> Infer<'a> {
                 }
                 res
             }),
+            Node::Unary(_) => todo!(),
+            Node::Call(_) => todo!(),
             Node::FnProto(inner) => {
                 let info = self.check_fn_proto(&inner)?;
                 self.set_info_for_type_defn(node_index, info);

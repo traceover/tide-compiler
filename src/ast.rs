@@ -11,6 +11,8 @@ pub enum Node {
     Ident(String),
     Number(BigInt),
     Binary(Binary),
+    Unary(Unary),
+    Call(CallExpr),
     FnProto(FnProto),
     FnLiteral(FnLiteral),
     Block(Block),
@@ -41,8 +43,33 @@ pub enum Oper {
     Geq,
     Leq,
 
+    And,
+    Or,
+    Xor,
     Shl,
     Shr,
+
+    LogicAnd,
+    LogicOr,
+}
+#[derive(Debug, Copy, Clone, Constructor)]
+pub struct Unary {
+    pub op: UnaryOp,
+    pub inner: NodeId,
+}
+
+#[derive(Debug, Copy, Clone, IsVariant)]
+pub enum UnaryOp {
+    BitNot,
+    Negation,
+    AddressOf,
+    LogicNot,
+}
+
+#[derive(Debug, Clone, Constructor)]
+pub struct CallExpr {
+    proc: NodeId,
+    args: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone, Constructor)]
@@ -142,6 +169,13 @@ impl Decl {
                 Node::Binary(bin) => {
                     stack.push_back(bin.lhs);
                     stack.push_back(bin.rhs);
+                }
+                Node::Unary(unary) => {
+                    stack.push_back(unary.inner);
+                }
+                Node::Call(CallExpr { proc, args }) => {
+                    stack.push_back(*proc);
+                    stack.extend(args);
                 }
                 Node::FnProto(FnProto { params, result }) => {
                     for param in params {
@@ -249,6 +283,13 @@ impl Ast {
                         stack.push(*lhs);
                         stack.push(*rhs);
                     }
+                    Node::Unary(Unary { inner, .. }) => {
+                        stack.push(*inner);
+                    }
+                    Node::Call(CallExpr { proc, args }) => {
+                        stack.push(*proc);
+                        stack.extend(args);
+                    }
                     Node::FnProto(FnProto { params, result }) => {
                         for param in params {
                             stack.push(param.type_defn);
@@ -282,6 +323,19 @@ impl Ast {
                     let lhs = self.display(bin.lhs);
                     let rhs = self.display(bin.rhs);
                     format!("{} {} {}", lhs, bin.op, rhs)
+                }
+                Node::Unary(unary) => {
+                    let inner = self.display(unary.inner);
+                    format!("{} {}", unary.op, inner)
+                }
+                Node::Call(CallExpr { proc, args }) => {
+                    let proc = self.display(*proc);
+                    let args = args
+                        .iter()
+                        .map(|&arg| self.display(arg))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}({})", proc, args)
                 }
                 Node::FnProto(FnProto { params, result }) => {
                     let params = params
@@ -374,8 +428,25 @@ impl fmt::Display for Oper {
             Oper::Geq => write!(f, ">="),
             Oper::Leq => write!(f, "<="),
 
+            Oper::And => write!(f, "&"),
+            Oper::Or => write!(f, "|"),
+            Oper::Xor => write!(f, "^"),
             Oper::Shl => write!(f, "<<"),
             Oper::Shr => write!(f, ">>"),
+
+            Oper::LogicAnd => write!(f, "and"),
+            Oper::LogicOr => write!(f, "or"),
+        }
+    }
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            UnaryOp::BitNot => write!(f, "~"),
+            UnaryOp::Negation => write!(f, "-"),
+            UnaryOp::AddressOf => write!(f, "*"),
+            UnaryOp::LogicNot => write!(f, "!"),
         }
     }
 }

@@ -5,6 +5,7 @@ pub mod program;
 pub mod types;
 pub mod bytecode;
 pub mod lexer;
+pub mod parser;
 
 use ast::*;
 use infer::Infer;
