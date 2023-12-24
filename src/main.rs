@@ -28,19 +28,18 @@ fn main() {
 
     for file_path in env::args().skip(1) {
         let lexer = Lexer::from_file_path(file_path).expect("Failed to read file: {file_path}");
+
         let ast = Parser::parse(lexer).unwrap_or_else(|err| {
             eprintln!("ERROR: {err:?}");
             exit(1);
         });
         program_context.borrow_mut().insert_ast(&ast);
 
-        let infer = match Infer::infer(program_context.clone(), &ast) {
-            Ok(infer) => infer,
-            Err(err) => {
-                eprintln!("ERROR: {err:?}");
-                exit(1);
-            }
-        };
+        let infer = Infer::infer(program_context.clone(), &ast).unwrap_or_else(|err| {
+            eprintln!("ERROR: {err:?}");
+            exit(1);
+        });
+
         interp.add_decls(&infer);
     }
 
