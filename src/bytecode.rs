@@ -1,10 +1,10 @@
 use crate::ast::*;
-use crate::infer::Infer;
 use crate::constant::Const;
-use std::fmt;
-use std::collections::HashMap;
+use crate::infer::Infer;
 use derive_more::Constructor;
 use num_traits::ToPrimitive;
+use std::collections::HashMap;
+use std::fmt;
 
 pub type Word = u64;
 
@@ -111,7 +111,10 @@ impl Interp {
 
     #[inline]
     pub fn constant(&self, index: u8) -> Word {
-        self.constants.get(index as usize).cloned().unwrap_or_default()
+        self.constants
+            .get(index as usize)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn run(&mut self) {
@@ -342,7 +345,10 @@ impl Interp {
             Node::Ident(name) => {
                 let label = self.labels.get(name).expect("Failed to get label");
                 match label {
-                    Label::Constant(id) => self.program.push(Inst::new(Opcode::Constant, reg, *id as u8, 0)),
+                    Label::Constant(id) => {
+                        self.program
+                            .push(Inst::new(Opcode::Constant, reg, *id as u8, 0))
+                    }
                     Label::Address(_) => todo!(),
                 }
             }
@@ -350,23 +356,22 @@ impl Interp {
                 let word = x.to_u64().unwrap();
                 let id = self.constants.len();
                 self.constants.push(word);
-                self.program.push(Inst::new(Opcode::Constant, reg, id as u8, 0));
+                self.program
+                    .push(Inst::new(Opcode::Constant, reg, id as u8, 0));
             }
-            Node::Binary(bin) => {
-                match bin.op {
-                    Oper::Add => {
-                        self.add_instructions(ast, bin.lhs, reg);
-                        self.add_instructions(ast, bin.rhs, reg + 1);
-                        self.program.push(Inst::new(Opcode::Add, reg, reg + 1, reg));
-                    }
-                    Oper::Mul => {
-                        self.add_instructions(ast, bin.lhs, reg);
-                        self.add_instructions(ast, bin.rhs, reg + 1);
-                        self.program.push(Inst::new(Opcode::Mul, reg, reg + 1, reg));
-                    }
-                    _ => todo!(),
+            Node::Binary(bin) => match bin.op {
+                Oper::Add => {
+                    self.add_instructions(ast, bin.lhs, reg);
+                    self.add_instructions(ast, bin.rhs, reg + 1);
+                    self.program.push(Inst::new(Opcode::Add, reg, reg + 1, reg));
                 }
-            }
+                Oper::Mul => {
+                    self.add_instructions(ast, bin.lhs, reg);
+                    self.add_instructions(ast, bin.rhs, reg + 1);
+                    self.program.push(Inst::new(Opcode::Mul, reg, reg + 1, reg));
+                }
+                _ => todo!(),
+            },
             Node::Unary(_) => todo!(),
             Node::Call(_) => todo!(),
             Node::FnProto(_) => todo!(),
@@ -386,6 +391,7 @@ impl Interp {
                 }
             }
             Node::ImplicitReturn(_) => todo!(),
+            Node::VarStmt(_) => todo!(),
         }
     }
 }

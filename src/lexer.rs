@@ -1,7 +1,7 @@
-use std::fmt;
-use std::path::PathBuf;
+use derive_more::{IsVariant, Unwrap};
 use num_bigint::BigInt;
-use derive_more::IsVariant;
+use std::path::PathBuf;
+use std::{fmt, fs, io};
 
 /// A custom location type to represent the location of tokens or errors.
 /// This enum has two variants: `File` and `Str`.
@@ -17,7 +17,7 @@ pub enum Loc {
     Str {
         col: usize,
         line: Vec<char>,
-    }
+    },
 }
 
 /// Formats the location as it would appear in many other programming language compilers,
@@ -29,11 +29,16 @@ impl fmt::Display for Loc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Loc::File { path, row, col } => {
-                write!(f, "{path}:{row}:{col}", path = PathBuf::from(&path).display(), col = col + 1)
-            },
+                write!(
+                    f,
+                    "{path}:{row}:{col}",
+                    path = PathBuf::from(&path).display(),
+                    col = col + 1
+                )
+            }
             Loc::Str { col, line: _ } => {
                 write!(f, "(from a string):{col}", col = col + 1)
-            },
+            }
         }
     }
 }
@@ -59,6 +64,11 @@ impl Lexer {
             cnum: 0,
             error: None,
         }
+    }
+
+    pub fn from_file_path(file_path: String) -> Result<Self, io::Error> {
+        let chars: Vec<_> = fs::read_to_string(&file_path)?.chars().collect();
+        Ok(Lexer::new(chars, Some(file_path)))
     }
 
     /// Retrieves the current line being analyzed as a vector of characters.
@@ -88,7 +98,7 @@ impl Lexer {
     #[inline]
     fn drop_char_if<F>(&mut self, predicate: F) -> Option<char>
     where
-         F: FnOnce(char) -> bool,
+        F: FnOnce(char) -> bool,
     {
         self.chars.get(self.cnum).copied().and_then(|ch| {
             if predicate(ch) {
@@ -173,14 +183,14 @@ impl Lexer {
                 '=' => self.switch2(Equals, EqualsEquals),
                 '!' => self.switch2(Bang, BangEquals),
                 '+' => self.switch2(Plus, PlusEquals),
-                '-' => self.switch2(Minus, MinusEquals),
+                '-' => self.switch3(Minus, MinusEquals, '>', Arrow),
                 '*' => self.switch2(Asterisk, AsteriskEquals),
                 '/' => match self.drop_char_by("=/") {
                     Some('=') => SlashEquals,
                     Some('/') => {
                         self.drop_line();
                         continue 'again;
-                    },
+                    }
                     _ => Slash,
                 },
                 '%' => self.switch2(Percent, PercentEquals),
@@ -196,12 +206,10 @@ impl Lexer {
                     if let Some(_) = self.drop_char_if(|x| x == '"') {
                         StrLit(text)
                     } else {
-                        self.error = Some(LexError::UnterminatedStrLit {
-                            start,
-                        });
+                        self.error = Some(LexError::UnterminatedStrLit { start });
                         return None;
                     }
-                },
+                }
                 x => {
                     let loc = self.loc();
                     if is_ident_char(x) {
@@ -216,30 +224,24 @@ impl Lexer {
                             match text.parse::<BigInt>() {
                                 Ok(x) => IntLit(x),
                                 Err(_) => {
-                                    self.error = Some(LexError::InvalidIntLit {
-                                        text,
-                                        loc,
-                                    });
+                                    self.error = Some(LexError::InvalidIntLit { text, loc });
                                     return None;
-                                },
+                                }
                             }
                         } else {
                             Ident(text)
                         }
                     } else {
-                        self.error = Some(LexError::InvalidChar {
-                            ch: x,
-                            loc,
-                        });
+                        self.error = Some(LexError::InvalidChar { ch: x, loc });
                         return None;
                     }
-                },
+                }
             });
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, IsVariant)]
+#[derive(Debug, Clone, PartialEq, IsVariant, Unwrap)]
 pub enum Token {
     // Literals / multi-char tokens
     Ident(String),
@@ -258,6 +260,7 @@ pub enum Token {
     Period,
     Colon,
     Semicolon,
+    Arrow,
 
     // Operator tokens
     Equals,
@@ -293,21 +296,13 @@ pub enum Token {
 
     // Not an actual token, but used in the parser to detect the end
     // without having to bounds check
-    EndOfFile
+    EndOfFile,
 }
 
 pub enum LexError {
-    UnterminatedStrLit {
-        start: Loc,
-    },
-    InvalidChar {
-        loc: Loc,
-        ch: char,
-    },
-    InvalidIntLit {
-        loc: Loc,
-        text: String,
-    },
+    UnterminatedStrLit { start: Loc },
+    InvalidChar { loc: Loc, ch: char },
+    InvalidIntLit { loc: Loc, text: String },
 }
 
 /// Implementing `Iterator` for `Lexer`, where each iteration returns a `Token` and its `Loc`.

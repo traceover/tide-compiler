@@ -140,6 +140,10 @@ impl<'a> Infer<'a> {
         }
     }
 
+    pub fn infer_var_stmt(&mut self, _var: &VarStmt) -> Result<TypeId> {
+        todo!()
+    }
+
     /// The type of a function literal does not depend on its body.
     /// Maybe at some point we would allow that for lambda expressions,
     /// so that the return type does not have to be specified. But,
@@ -234,6 +238,7 @@ impl<'a> Infer<'a> {
             }
             Node::Return(_) => Ok(BuiltinType::Void as TypeId),
             Node::ImplicitReturn(x) => Ok(*self.types.get(&x).unwrap()),
+            Node::VarStmt(x) => self.infer_var_stmt(&x),
         }
     }
 
@@ -264,17 +269,19 @@ impl<'a> Infer<'a> {
     /// as well.
     pub fn check_fn_proto(&mut self, proto: &FnProto) -> Result<TypeInfo> {
         let mut params = Vec::new();
-        for param in &proto.params {
-            self.match_types(param.type_defn, BuiltinType::Type as TypeId)?;
+        for (name, &type_defn) in &proto.params {
+            self.match_types(type_defn, BuiltinType::Type as TypeId)?;
             let id = self
-                .get_type_defn_type_id(param.type_defn)
+                .get_type_defn_type_id(type_defn)
                 .ok_or(InferError::InvalidTypeDefn)?;
-            params.push((param.name.clone(), id));
+            params.push((name.clone(), id));
         }
-        let result = {
-            self.match_types(proto.result, BuiltinType::Type as TypeId)?;
-            self.get_type_defn_type_id(proto.result)
+        let result = if let Some(result) = proto.result {
+            self.match_types(result, BuiltinType::Type as TypeId)?;
+            self.get_type_defn_type_id(result)
                 .ok_or(InferError::InvalidTypeDefn)?
+        } else {
+            BuiltinType::Void as TypeId
         };
         Ok(TypeInfo::Procedure(ProcType::new(params, result)))
     }
@@ -298,12 +305,8 @@ impl<'a> Infer<'a> {
                 (Integer(a), Integer(b)) if a.signed != b.signed => {
                     Err(InferError::SignednessMismatch)
                 }
-                (Integer(_), Bool) => {
-                    Err(InferError::ImplicitIntToBool)
-                }
-                (Float(_), Integer(_)) => {
-                    Err(InferError::ImplicitFloatToInt)
-                }
+                (Integer(_), Bool) => Err(InferError::ImplicitIntToBool),
+                (Float(_), Integer(_)) => Err(InferError::ImplicitFloatToInt),
                 _ => {
                     if let Some(constant) = self.constants.get(&node) {
                         let constant = self.match_const_to_type(constant, expect)?;

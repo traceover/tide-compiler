@@ -1,7 +1,8 @@
 use crate::types::BuiltinType;
 use derive_more::{Constructor, IsVariant, Unwrap};
+use hashbrown::{HashMap, HashSet};
 use num_bigint::BigInt;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::fmt;
 
 pub type NodeId = usize;
@@ -19,6 +20,7 @@ pub enum Node {
     BuiltinType(BuiltinType),
     Return(Option<NodeId>),
     ImplicitReturn(NodeId),
+    VarStmt(VarStmt),
 }
 
 #[derive(Debug, Copy, Clone, Constructor)]
@@ -74,14 +76,9 @@ pub struct CallExpr {
 
 #[derive(Debug, Clone, Constructor)]
 pub struct FnProto {
-    pub params: Vec<Param>,
-    pub result: NodeId,
-}
-
-#[derive(Debug, Clone, Constructor)]
-pub struct Param {
-    pub name: String,
-    pub type_defn: NodeId,
+    /// `NodeId` is a type definition node representing the type of the parameter.
+    pub params: HashMap<String, NodeId>,
+    pub result: Option<NodeId>,
 }
 
 /// Represents the syntax tree for the node `(x: int) -> int { x * 2 }`.
@@ -91,10 +88,20 @@ pub struct FnLiteral {
     pub block: NodeId,
 }
 
-/// A block is a list of statements with an optional implicit return.
-#[derive(Debug, Clone, Constructor)]
+/// A block is a list of statements with an optional implicit return,
+/// as well as a scope containing all declarations defined in the block.
+#[derive(Debug, Default, Clone, Constructor)]
 pub struct Block {
+    pub parent: Option<Box<Block>>,
     pub stmts: Vec<NodeId>,
+    pub members: HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Constructor)]
+pub struct VarStmt {
+    pub name: String,
+    pub type_defn: Option<NodeId>,
+    pub init_expr: NodeId,
 }
 
 #[derive(Debug, Clone)]
@@ -178,15 +185,17 @@ impl Decl {
                     stack.extend(args);
                 }
                 Node::FnProto(FnProto { params, result }) => {
-                    for param in params {
-                        stack.push_back(param.type_defn);
+                    for (_, &type_defn) in params {
+                        stack.push_back(type_defn);
                     }
-                    stack.push_back(*result);
+                    if let Some(result) = result {
+                        stack.push_back(*result);
+                    }
                 }
                 Node::FnLiteral(FnLiteral { type_defn, .. }) => {
                     stack.push_back(*type_defn);
                 }
-                Node::Block(Block { stmts }) => {
+                Node::Block(Block { stmts, .. }) => {
                     stack.extend(stmts);
                 }
                 Node::BuiltinType(_) => {}
@@ -195,6 +204,16 @@ impl Decl {
                 }
                 Node::ImplicitReturn(x) => {
                     stack.push_back(*x);
+                }
+                Node::VarStmt(VarStmt {
+                    name: _,
+                    type_defn,
+                    init_expr,
+                }) => {
+                    if let Some(type_defn) = type_defn {
+                        stack.push_back(*type_defn);
+                    }
+                    stack.push_back(*init_expr);
                 }
             }
         }
@@ -291,16 +310,18 @@ impl Ast {
                         stack.extend(args);
                     }
                     Node::FnProto(FnProto { params, result }) => {
-                        for param in params {
-                            stack.push(param.type_defn);
+                        for (_, &type_defn) in params {
+                            stack.push(type_defn);
                         }
-                        stack.push(*result);
+                        if let Some(result) = result {
+                            stack.push(*result);
+                        }
                     }
                     Node::FnLiteral(FnLiteral { type_defn, block }) => {
                         stack.push(*type_defn);
                         stack.push(*block);
                     }
-                    Node::Block(Block { stmts }) => {
+                    Node::Block(Block { stmts, .. }) => {
                         stack.extend(stmts);
                     }
                     Node::Return(Some(x)) => {
@@ -308,6 +329,16 @@ impl Ast {
                     }
                     Node::ImplicitReturn(x) => {
                         stack.push(*x);
+                    }
+                    Node::VarStmt(VarStmt {
+                        name: _,
+                        type_defn,
+                        init_expr,
+                    }) => {
+                        if let Some(type_defn) = type_defn {
+                            stack.push(*type_defn);
+                        }
+                        stack.push(*init_expr);
                     }
                 }
             }
@@ -340,10 +371,14 @@ impl Ast {
                 Node::FnProto(FnProto { params, result }) => {
                     let params = params
                         .iter()
-                        .map(|par| format!("{}: {}", par.name, self.display(par.type_defn)))
+                        .map(|(name, &type_defn)| format!("{}: {}", name, self.display(type_defn)))
                         .collect::<Vec<_>>()
                         .join(", ");
-                    let result = self.display(*result);
+                    let result = if let Some(result) = result {
+                        self.display(*result)
+                    } else {
+                        "void".into()
+                    };
                     format!("({}) -> {}", params, result)
                 }
                 Node::FnLiteral(FnLiteral { type_defn, block }) => {
@@ -351,7 +386,7 @@ impl Ast {
                     let block = self.display(*block);
                     format!("{} {}", type_defn, block)
                 }
-                Node::Block(Block { stmts }) => {
+                Node::Block(Block { stmts, .. }) => {
                     let stmts = stmts
                         .iter()
                         .map(|&x| self.display(x))
@@ -363,6 +398,19 @@ impl Ast {
                 Node::Return(Some(result)) => format!("return {}", self.display(*result)),
                 Node::ImplicitReturn(result) => format!("return {}", self.display(*result)),
                 Node::Return(None) => "return".into(),
+                Node::VarStmt(VarStmt {
+                    name,
+                    type_defn,
+                    init_expr,
+                }) => {
+                    let init_expr = self.display(*init_expr);
+                    if let Some(type_defn) = type_defn {
+                        let type_defn = self.display(*type_defn);
+                        format!("{name}: {type_defn} = {init_expr}")
+                    } else {
+                        format!("{name} := {init_expr}")
+                    }
+                }
             }
         } else {
             format!("(Invalid index: {})", index)
