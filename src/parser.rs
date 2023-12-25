@@ -328,7 +328,7 @@ impl Parser {
                     let needs_semi = !self.tokens[self.index - 1].is_close_brace();
                     if needs_semi {
                         // Implicit return statement
-                        if self.peek_token().is_close_brace() {
+                        if self.consume_token(Token::CloseBrace) {
                             let last = self.block.stmts.last_mut().unwrap();
                             *last = self.ast.append(Node::ImplicitReturn(*last));
                             break;

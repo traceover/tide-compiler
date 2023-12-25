@@ -390,7 +390,10 @@ impl Interp {
                     self.program.push(Inst::new(Opcode::Return, 0, 0, 0));
                 }
             }
-            Node::ImplicitReturn(_) => todo!(),
+            Node::ImplicitReturn(result) => {
+                self.add_instructions(ast, *result, reg);
+                self.program.push(Inst::new(Opcode::Return, reg, 0, 0));
+            }
             Node::VarStmt(_) => todo!(),
         }
     }
