@@ -3,6 +3,7 @@ pub mod bytecode;
 pub mod constant;
 pub mod infer;
 pub mod lexer;
+pub mod opcode;
 pub mod parser;
 pub mod program;
 pub mod types;
@@ -14,6 +15,9 @@ use parser::Parser;
 use program::ProgramContext;
 
 extern crate derive_more;
+#[macro_use]
+extern crate lazy_static;
+
 use std::cell::RefCell;
 use std::env;
 use std::process::exit;
