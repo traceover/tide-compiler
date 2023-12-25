@@ -15,9 +15,6 @@ use parser::Parser;
 use program::ProgramContext;
 
 extern crate derive_more;
-#[macro_use]
-extern crate lazy_static;
-
 use std::cell::RefCell;
 use std::env;
 use std::process::exit;
